@@ -2,7 +2,7 @@
 
 ## Analyse
 
-### ** Initialize the genesis state of a blockchain **
+### Initialize the genesis state of a blockchain
 
 >   1. Round Information Initialization: Sets up the information for the first round and stores it in the Round storage item.
 
@@ -52,11 +52,11 @@ impl<
 
 ```
 
-### **pallet::hooks on_initialize** 
+### `#[pallet::hooks]` on_initialize 
 
 The `on_initialize` function serves as the entry point at the beginning of each block. This function performs a crucial check to determine whether it's time to initiate a new staking round. If the conditions are met, several key actions are executed:
    - Round Information Update: The metadata for the current round is updated to reflect the new round.
-      - 判断是否需要更新 round，如果 `BlockNumber` - `round.first` > round.length
+      - 判断是否需要更新 round，如果 `BlockNumber` - `round.first` > `round.length`
           - 需要更新 round
               - 更新 round
               - select_top_candidates
@@ -110,12 +110,15 @@ The `on_initialize` function serves as the entry point at the beginning of each 
 
 
 
-### **Handling Delayed Payouts**
+### `fn handle_delayed_payouts`
 
-> In cases where a new round is not initiated, the `handle_delayed_payouts` function is invoked. This function is responsible for:
-> - let delay = T::RewardPaymentDelay::get();
-> RewardPaymentDelay is 2.
-
+In cases where a new round is not initiated, the `handle_delayed_payouts` function is invoked. This function is responsible for:
+  - RewardPaymentDelay is 2.
+  - let delay = T::RewardPaymentDelay::get();
+  - 轮次小于 delay 的，不需要 payout
+  - 如果 DelayedPayouts 能查询到本轮到待支付信息，就执行 pay_one_collator_reward
+    - 如果 pay_one_collator_reward 执行成功，返回的是 `RewardPayment::Finished`，移除 DelayedPayouts 和 Points 中的本轮到数据记录
+  - 如果在 DelayedPayouts 没查询到本轮到待支付信息，就返回 `Weight::from_parts(0u64, 0)`
 ```Rust
 
     /// Wrapper around pay_one_collator_reward which handles the following logic:
@@ -148,7 +151,7 @@ The `on_initialize` function serves as the entry point at the beginning of each 
 
 ```
 
-### **Collator Reward Payout**
+### `fn pay_one_collator_reward`
 
 > The `pay_one_collator_reward` function is specialized for handling the reward distribution to a single collator. It performs the following:
 >    - **Reward Calculation**: The function calculates the reward based on the staking ratio between the collator and the delegators.
@@ -156,143 +159,143 @@ The `on_initialize` function serves as the entry point at the beginning of each 
 
 ```Rust
 
-    /// Payout a single collator from the given round.
-    ///
-    /// Returns an optional tuple of (Collator's AccountId, total paid)
-    /// or None if there were no more payouts to be made for the round.
-    pub(crate) fn pay_one_collator_reward(
-        paid_for_round: RoundIndex,
-        payout_info: DelayedPayout<BalanceOf<T>>,
-    ) -> (RewardPayment, Weight) {
-        // 'early_weight' tracks weight used for reads/writes done early in this fn before its
-        // early-exit codepaths.
-        let mut early_weight = Weight::zero();
+/// Payout a single collator from the given round.
+///
+/// Returns an optional tuple of (Collator's AccountId, total paid)
+/// or None if there were no more payouts to be made for the round.
+pub(crate) fn pay_one_collator_reward(
+    paid_for_round: RoundIndex,
+    payout_info: DelayedPayout<BalanceOf<T>>,
+) -> (RewardPayment, Weight) {
+    // 'early_weight' tracks weight used for reads/writes done early in this fn before its
+    // early-exit codepaths.
+    let mut early_weight = Weight::zero();
 
-        // TODO: it would probably be optimal to roll Points into the DelayedPayouts storage
-        // item so that we do fewer reads each block
-        let total_points = <Points<T>>::get(paid_for_round);
-        early_weight = early_weight.saturating_add(T::DbWeight::get().reads_writes(1, 0));
+    // TODO: it would probably be optimal to roll Points into the DelayedPayouts storage
+    // item so that we do fewer reads each block
+    let total_points = <Points<T>>::get(paid_for_round);
+    early_weight = early_weight.saturating_add(T::DbWeight::get().reads_writes(1, 0));
 
-        if total_points.is_zero() {
-            // TODO: this case is obnoxious... it's a value query, so it could mean one of two
-            // different logic errors:
-            // 1. we removed it before we should have
-            // 2. we called pay_one_collator_reward when we were actually done with deferred
-            //    payouts
-            log::warn!("pay_one_collator_reward called with no <Points<T>> for the round!");
-            return (RewardPayment::Finished, early_weight);
+    if total_points.is_zero() {
+        // TODO: this case is obnoxious... it's a value query, so it could mean one of two
+        // different logic errors:
+        // 1. we removed it before we should have
+        // 2. we called pay_one_collator_reward when we were actually done with deferred
+        //    payouts
+        log::warn!("pay_one_collator_reward called with no <Points<T>> for the round!");
+        return (RewardPayment::Finished, early_weight);
+    }
+
+    let collator_fee = payout_info.collator_commission;
+    let collator_issuance = collator_fee * payout_info.round_issuance;
+    if let Some((collator, state)) =
+        <AtStake<T>>::iter_prefix(paid_for_round).drain().next()
+    {
+        // read and kill AtStake
+        early_weight = early_weight.saturating_add(T::DbWeight::get().reads_writes(1, 1));
+
+        // Take the awarded points for the collator
+        let pts = <AwardedPts<T>>::take(paid_for_round, &collator);
+        // read and kill AwardedPts
+        early_weight = early_weight.saturating_add(T::DbWeight::get().reads_writes(1, 1));
+        if pts == 0 {
+            return (RewardPayment::Skipped, early_weight);
         }
 
-        let collator_fee = payout_info.collator_commission;
-        let collator_issuance = collator_fee * payout_info.round_issuance;
-        if let Some((collator, state)) =
-            <AtStake<T>>::iter_prefix(paid_for_round).drain().next()
-        {
-            // read and kill AtStake
-            early_weight = early_weight.saturating_add(T::DbWeight::get().reads_writes(1, 1));
+        // 'extra_weight' tracks weight returned from fns that we delegate to which can't be
+        // known ahead of time.
+        let mut extra_weight = Weight::zero();
+        let pct_due = Perbill::from_rational(pts, total_points);
+        let total_paid = pct_due * payout_info.total_staking_reward;
+        let mut amt_due = total_paid;
 
-            // Take the awarded points for the collator
-            let pts = <AwardedPts<T>>::take(paid_for_round, &collator);
-            // read and kill AwardedPts
-            early_weight = early_weight.saturating_add(T::DbWeight::get().reads_writes(1, 1));
-            if pts == 0 {
-                return (RewardPayment::Skipped, early_weight);
-            }
-
-            // 'extra_weight' tracks weight returned from fns that we delegate to which can't be
-            // known ahead of time.
-            let mut extra_weight = Weight::zero();
-            let pct_due = Perbill::from_rational(pts, total_points);
-            let total_paid = pct_due * payout_info.total_staking_reward;
-            let mut amt_due = total_paid;
-
-            let num_delegators = state.delegations.len();
-            let mut num_paid_delegations = 0u32;
-            let mut num_auto_compounding = 0u32;
-            let num_scheduled_requests = <DelegationScheduledRequests<T>>::get(&collator).len();
-            if state.delegations.is_empty() {
-                // solo collator with no delegators
-                extra_weight = extra_weight
-                    .saturating_add(T::PayoutCollatorReward::payout_collator_reward(
-                        paid_for_round,
-                        collator.clone(),
-                        amt_due,
-                    ))
-                    .saturating_add(T::OnCollatorPayout::on_collator_payout(
-                        paid_for_round,
-                        collator.clone(),
-                        amt_due,
-                    ));
-            } else {
-                // pay collator first; commission + due_portion
-                let collator_pct = Perbill::from_rational(state.bond, state.total);
-                let commission = pct_due * collator_issuance;
-                amt_due = amt_due.saturating_sub(commission);
-                let collator_reward = (collator_pct * amt_due).saturating_add(commission);
-                extra_weight = extra_weight
-                    .saturating_add(T::PayoutCollatorReward::payout_collator_reward(
-                        paid_for_round,
-                        collator.clone(),
-                        collator_reward,
-                    ))
-                    .saturating_add(T::OnCollatorPayout::on_collator_payout(
-                        paid_for_round,
-                        collator.clone(),
-                        collator_reward,
-                    ));
-
-                // pay delegators due portion
-                for BondWithAutoCompound {
-                    owner,
-                    amount,
-                    auto_compound,
-                } in state.delegations
-                {
-                    let percent = Perbill::from_rational(amount, state.total);
-                    let due = percent * amt_due;
-                    if !due.is_zero() {
-                        num_auto_compounding += if auto_compound.is_zero() { 0 } else { 1 };
-                        num_paid_delegations += 1u32;
-                        Self::mint_and_compound(
-                            due,
-                            auto_compound.clone(),
-                            collator.clone(),
-                            owner.clone(),
-                        );
-                    }
-                }
-            }
-
-            extra_weight =
-                extra_weight.saturating_add(T::WeightInfo::pay_one_collator_reward_best(
-                    num_paid_delegations,
-                    num_auto_compounding,
-                    num_scheduled_requests as u32,
+        let num_delegators = state.delegations.len();
+        let mut num_paid_delegations = 0u32;
+        let mut num_auto_compounding = 0u32;
+        let num_scheduled_requests = <DelegationScheduledRequests<T>>::get(&collator).len();
+        if state.delegations.is_empty() {
+            // solo collator with no delegators
+            extra_weight = extra_weight
+                .saturating_add(T::PayoutCollatorReward::payout_collator_reward(
+                    paid_for_round,
+                    collator.clone(),
+                    amt_due,
+                ))
+                .saturating_add(T::OnCollatorPayout::on_collator_payout(
+                    paid_for_round,
+                    collator.clone(),
+                    amt_due,
+                ));
+        } else {
+            // pay collator first; commission + due_portion
+            let collator_pct = Perbill::from_rational(state.bond, state.total);
+            let commission = pct_due * collator_issuance;
+            amt_due = amt_due.saturating_sub(commission);
+            let collator_reward = (collator_pct * amt_due).saturating_add(commission);
+            extra_weight = extra_weight
+                .saturating_add(T::PayoutCollatorReward::payout_collator_reward(
+                    paid_for_round,
+                    collator.clone(),
+                    collator_reward,
+                ))
+                .saturating_add(T::OnCollatorPayout::on_collator_payout(
+                    paid_for_round,
+                    collator.clone(),
+                    collator_reward,
                 ));
 
-            (
-                RewardPayment::Paid,
-                T::WeightInfo::pay_one_collator_reward(num_delegators as u32)
-                    .saturating_add(extra_weight),
-            )
-        } else {
-            // Note that we don't clean up storage here; it is cleaned up in
-            // handle_delayed_payouts()
-            (RewardPayment::Finished, Weight::from_parts(0u64, 0))
+            // pay delegators due portion
+            for BondWithAutoCompound {
+                owner,
+                amount,
+                auto_compound,
+            } in state.delegations
+            {
+                let percent = Perbill::from_rational(amount, state.total);
+                let due = percent * amt_due;
+                if !due.is_zero() {
+                    num_auto_compounding += if auto_compound.is_zero() { 0 } else { 1 };
+                    num_paid_delegations += 1u32;
+                    Self::mint_and_compound(
+                        due,
+                        auto_compound.clone(),
+                        collator.clone(),
+                        owner.clone(),
+                    );
+                }
+            }
         }
+
+        extra_weight =
+            extra_weight.saturating_add(T::WeightInfo::pay_one_collator_reward_best(
+                num_paid_delegations,
+                num_auto_compounding,
+                num_scheduled_requests as u32,
+            ));
+
+        (
+            RewardPayment::Paid,
+            T::WeightInfo::pay_one_collator_reward(num_delegators as u32)
+                .saturating_add(extra_weight),
+        )
+    } else {
+        // Note that we don't clean up storage here; it is cleaned up in
+        // handle_delayed_payouts()
+        (RewardPayment::Finished, Weight::from_parts(0u64, 0))
     }
+}
 
 
 ```
 
-### **Reward Minting and Compounding**
+### `fn mint_and_compound`
 
-> The `mint_and_compound` function is designed to not only payout rewards to delegators but also to compound a portion of these rewards for future growth. It operates as follows:
->    - **Immediate Payout**: Initially, the rewards are paid out to the delegators.
->    - **Compounding**: A portion of the rewards is then compounded based on a predefined ratio to facilitate growth.
+The `mint_and_compound` function is designed to not only payout rewards to delegators but also to compound a portion of these rewards for future growth. It operates as follows:
+   - **Immediate Payout**: Initially, the rewards are paid out to the delegators.
+   - **Compounding**: A portion of the rewards is then compounded based on a predefined ratio to facilitate growth.
 
 ```rust
-    		/// Mint and compound delegation rewards. The function mints the amount towards the
+    	/// Mint and compound delegation rewards. The function mints the amount towards the
 		/// delegator and tries to compound a specified percent of it back towards the delegation.
 		/// If a scheduled delegation revoke exists, then the amount is only minted, and nothing is
 		/// compounded. Emits the [Compounded] event.
@@ -339,7 +342,7 @@ The `on_initialize` function serves as the entry point at the beginning of each 
 	}
 ```
 
-### **Delegator Staking Enhancement**
+### Delegator Staking Enhancement
 
 > The `delegation_bond_more_without_event` function is tailored to assist delegators in increasing their staked amount. It also enables the option for automatic compounding. The function performs these tasks:
 >    - **Pending Undelegation Check**: It first checks if there are any pending undelegation requests.
@@ -380,7 +383,7 @@ The `on_initialize` function serves as the entry point at the beginning of each 
 ```
 
 
-### **pallet::hooks on_finalize** 
+### `#[pallet::hooks]` on_finalize 
 
 > 用于给 `BlockAuthor` 增加积分
 
