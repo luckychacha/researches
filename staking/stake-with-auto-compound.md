@@ -52,17 +52,18 @@ impl<
 
 ```
 
-### **Initialization of New Rounds** 
+### **pallet::hooks on_initialize** 
 
-> The `on_initialize` function serves as the entry point at the beginning of each block. This function performs a crucial check to determine whether it's time to initiate a new staking round. If the conditions are met, several key actions are executed:
->    - Round Information Update: The metadata for the current round is updated to reflect the new round.
->       - When now - round.first > round.length round should update
->    - Notification Trigger: Events are emitted to notify the network that a new round has commenced.
->    - Delayed Rewards Preparation: Any rewards that are scheduled for future payout are prepared and queued.
->    - Candidate Selection: The algorithm selects the top-performing candidates based on predefined criteria for the upcoming round.
->    - State Storage: The new round number and the total amount staked in the round are stored for future reference.
-
-    ```Rust
+The `on_initialize` function serves as the entry point at the beginning of each block. This function performs a crucial check to determine whether it's time to initiate a new staking round. If the conditions are met, several key actions are executed:
+   - Round Information Update: The metadata for the current round is updated to reflect the new round.
+      - 判断是否需要更新 round，如果 `BlockNumber` - `round.first` > round.length
+          - 需要更新 round
+              - 更新 round
+              - select_top_candidates
+              - prepare_staking_payouts
+          - 不需要更新 round
+            - handle_delayed_payouts
+```Rust
     #[pallet::hooks]
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
         fn on_initialize(n: T::BlockNumber) -> Weight {
@@ -105,7 +106,9 @@ impl<
         // ....
     }
 
-    ```
+```
+
+
 
 ### **Handling Delayed Payouts**
 
@@ -374,4 +377,27 @@ impl<
 
         Ok((in_top, actual_weight))
     }
+```
+
+
+### **pallet::hooks on_finalize** 
+
+> 用于给 `BlockAuthor` 增加积分
+
+```Rust
+#[pallet::hooks]
+impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+    fn on_finalize(_n: T::BlockNumber) {
+        Self::award_points_to_block_author();
+    }
+}
+
+fn award_points_to_block_author() {
+    let author = T::BlockAuthor::get();
+    let now = <Round<T>>::get().current;
+    let score_plus_20 = <AwardedPts<T>>::get(now, &author).saturating_add(20);
+    <AwardedPts<T>>::insert(now, author, score_plus_20);
+    <Points<T>>::mutate(now, |x| *x = x.saturating_add(20));
+}
+
 ```
