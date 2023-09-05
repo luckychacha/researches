@@ -1,4 +1,66 @@
-1. **Initialization of New Rounds**: The `on_initialize` function serves as the entry point at the beginning of each block. This function performs a crucial check to determine whether it's time to initiate a new staking round. If the conditions are met, several key actions are executed:
+# Stake With Auto Compound
+
+## Analyse
+
+### ** Initialize the genesis state of a blockchain **
+
+>   1. Round Information Initialization: Sets up the information for the first round and stores it in the Round storage item.
+
+```Rust
+
+#[derive(Copy, Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo)]
+/// The current round index and transition information
+pub struct RoundInfo<BlockNumber> {
+    /// Current round index
+    pub current: RoundIndex,
+    /// The first block of the current round
+    pub first: BlockNumber,
+    /// The length of the current round in number of blocks
+    pub length: u32,
+}
+
+#[pallet::genesis_build]
+pub struct GenesisConfig<T: Config> {
+    // ...
+    let round: RoundInfo<T::BlockNumber> =
+            RoundInfo::new(1u32, 0u32.into(), self.blocks_per_round);
+    <Round<T>>::put(round);
+    // ...
+}
+
+impl<
+		B: Copy + sp_std::ops::Add<Output = B> + sp_std::ops::Sub<Output = B> + From<u32> + PartialOrd,
+	> RoundInfo<B>
+{
+	pub fn new(current: RoundIndex, first: B, length: u32) -> RoundInfo<B> {
+		RoundInfo {
+			current,
+			first,
+			length,
+		}
+	}
+	/// Check if the round should be updated
+	pub fn should_update(&self, now: B) -> bool {
+		now - self.first >= self.length.into()
+	}
+	/// New round
+	pub fn update(&mut self, now: B) {
+		self.current = self.current.saturating_add(1u32);
+		self.first = now;
+	}
+}
+
+```
+
+### **Initialization of New Rounds** 
+
+> The `on_initialize` function serves as the entry point at the beginning of each block. This function performs a crucial check to determine whether it's time to initiate a new staking round. If the conditions are met, several key actions are executed:
+>    - Round Information Update: The metadata for the current round is updated to reflect the new round.
+>       - When now - round.first > round.length round should update
+>    - Notification Trigger: Events are emitted to notify the network that a new round has commenced.
+>    - Delayed Rewards Preparation: Any rewards that are scheduled for future payout are prepared and queued.
+>    - Candidate Selection: The algorithm selects the top-performing candidates based on predefined criteria for the upcoming round.
+>    - State Storage: The new round number and the total amount staked in the round are stored for future reference.
 
     ```Rust
     #[pallet::hooks]
@@ -45,8 +107,13 @@
 
     ```
 
-2. **Handling Delayed Payouts**: In cases where a new round is not initiated, the `handle_delayed_payouts` function is invoked. This function is responsible for:
-    ```Rust
+### **Handling Delayed Payouts**
+
+> In cases where a new round is not initiated, the `handle_delayed_payouts` function is invoked. This function is responsible for:
+> - let delay = T::RewardPaymentDelay::get();
+> RewardPaymentDelay is 2.
+
+```Rust
 
     /// Wrapper around pay_one_collator_reward which handles the following logic:
     /// * whether or not a payout needs to be made
@@ -76,14 +143,15 @@
         }
     }
 
-    ```
+```
 
-3. **Collator Reward Payout**: The `pay_one_collator_reward` function is specialized for handling the reward distribution to a single collator. It performs the following:
+### **Collator Reward Payout**
 
-    - **Reward Calculation**: The function calculates the reward based on the staking ratio between the collator and the delegators.
-    - **Payout Execution**: Once the reward is calculated, it is disbursed to the respective parties.
+> The `pay_one_collator_reward` function is specialized for handling the reward distribution to a single collator. It performs the following:
+>    - **Reward Calculation**: The function calculates the reward based on the staking ratio between the collator and the delegators.
+>    - **Payout Execution**: Once the reward is calculated, it is disbursed to the respective parties.
 
-    ```Rust
+```Rust
 
     /// Payout a single collator from the given round.
     ///
@@ -212,14 +280,15 @@
     }
 
 
-    ```
+```
 
-4. **Reward Minting and Compounding**: The `mint_and_compound` function is designed to not only payout rewards to delegators but also to compound a portion of these rewards for future growth. It operates as follows:
+### **Reward Minting and Compounding**
 
-    - **Immediate Payout**: Initially, the rewards are paid out to the delegators.
-    - **Compounding**: A portion of the rewards is then compounded based on a predefined ratio to facilitate growth.
+> The `mint_and_compound` function is designed to not only payout rewards to delegators but also to compound a portion of these rewards for future growth. It operates as follows:
+>    - **Immediate Payout**: Initially, the rewards are paid out to the delegators.
+>    - **Compounding**: A portion of the rewards is then compounded based on a predefined ratio to facilitate growth.
 
-    ```rust
+```rust
     		/// Mint and compound delegation rewards. The function mints the amount towards the
 		/// delegator and tries to compound a specified percent of it back towards the delegation.
 		/// If a scheduled delegation revoke exists, then the amount is only minted, and nothing is
@@ -265,13 +334,15 @@
 			};
 		}
 	}
-    ```
+```
 
-5. **Delegator Staking Enhancement**: The `delegation_bond_more_without_event` function is tailored to assist delegators in increasing their staked amount. It also enables the option for automatic compounding. The function performs these tasks:
+### **Delegator Staking Enhancement**
 
-    - **Pending Undelegation Check**: It first checks if there are any pending undelegation requests.
-    - **Stake Increase**: If no undelegation requests are found, the function increases the delegator's staked amount accordingly.
-    ```Rust
+> The `delegation_bond_more_without_event` function is tailored to assist delegators in increasing their staked amount. It also enables the option for automatic compounding. The function performs these tasks:
+>    - **Pending Undelegation Check**: It first checks if there are any pending undelegation requests.
+>    - **Stake Increase**: If no undelegation requests are found, the function increases the delegator's staked amount accordingly.
+
+```Rust
     /// This function exists as a helper to delegator_bond_more & auto_compound functionality.
     /// Any changes to this function must align with both user-initiated bond increases and
     /// auto-compounding bond increases.
@@ -303,4 +374,4 @@
 
         Ok((in_top, actual_weight))
     }
-    ```
+```
