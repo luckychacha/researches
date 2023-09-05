@@ -108,8 +108,6 @@ The `on_initialize` function serves as the entry point at the beginning of each 
 
 ```
 
-
-
 ### `fn handle_delayed_payouts`
 
 In cases where a new round is not initiated, the `handle_delayed_payouts` function is invoked. This function is responsible for:
@@ -153,10 +151,10 @@ In cases where a new round is not initiated, the `handle_delayed_payouts` functi
 
 ### `fn pay_one_collator_reward`
 
-> The `pay_one_collator_reward` function is specialized for handling the reward distribution to a single collator. It performs the following:
->    - **Reward Calculation**: The function calculates the reward based on the staking ratio between the collator and the delegators.
->    - **Payout Execution**: Once the reward is calculated, it is disbursed to the respective parties.
-
+The `pay_one_collator_reward` function is specialized for handling the reward distribution to a single collator. It performs the following:
+   - **Reward Calculation**: The function calculates the reward based on the staking ratio between the collator and the delegators.
+   - **Payout Execution**: Once the reward is calculated, it is disbursed to the respective parties.
+    - https://showme.redstarplugin.com/s/s:gkDHbEbs
 ```Rust
 
 /// Payout a single collator from the given round.
