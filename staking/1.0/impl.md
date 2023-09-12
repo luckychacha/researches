@@ -72,3 +72,22 @@ pub trait Config:
 }
 
 ```
+
+### staking genesis_build default reward destination is Staked
+
+```Rust
+#[pallet::genesis_build]
+impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
+    fn build(&self) {
+        for &(ref stash, ref controller, balance, ref status) in &self.stakers {
+            frame_support::assert_ok!(<Pallet<T>>::bond(
+                T::RuntimeOrigin::from(Some(stash.clone()).into()),
+                T::Lookup::unlookup(controller.clone()),
+                balance,
+                RewardDestination::Staked,
+            ));
+        }
+    }
+}
+
+```
