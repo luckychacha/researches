@@ -91,3 +91,64 @@ impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
 }
 
 ```
+
+
+
+--------------
+
+let election_result: BoundedVec<_, MaxWinnersOf<T>> = if is_genesis {
+    let result = <T::GenesisElectionProvider>::elect().map_err(|e| {
+        log!(warn, "genesis election provider failed due to {:?}", e);
+        Self::deposit_event(Event::StakingElectionFailed);
+    });
+
+    result
+        .ok()?
+        .into_inner()
+        .try_into()
+        // both bounds checked in integrity test to be equal
+        .defensive_unwrap_or_default()
+} else {
+    let result = <T::ElectionProvider>::elect().map_err(|e| {
+        log!(warn, "election provider failed due to {:?}", e);
+        Self::deposit_event(Event::StakingElectionFailed);
+    });
+    result.ok()?
+};
+let exposures = Self::collect_exposures(election_result);
+
+collect_exposures -> exposures
+
+trigger_new_era(start_session_index, exposures)
+|-Self::store_stakers_info(exposures, new_planned_era)
+    |-<ErasStakersClipped<T>>::insert(&new_planned_era, &stash, exposure_clipped);
+
+
+we calculate reward each session is:
+
+let exposure = <pallet_staking::ErasStakersClipped<T>>::get(era, &ledger.stash);
+let validator_exposure_part = Perbill::from_rational(exposure.own, exposure.total);
+let validator_staking_payout = validator_exposure_part * validator_leftover_payout;
+
+we do the payout is update Ledger:
+fn make_payout(stash: &T::AccountId, amount: BalanceOf<T>) -> Option<PositiveImbalanceOf<T>> {
+    match dest {
+    RewardDestination::Staked => {
+        pallet_staking::Pallet::<T>::bonded(stash)
+            .and_then(|c| pallet_staking::Pallet::<T>::ledger(&c).map(|l| (c, l)))
+            .and_then(|(controller, mut l)| {
+                l.active += amount;
+                l.total += amount;
+                let r = T::Currency::deposit_into_existing(stash, amount).ok();
+                T::Currency::set_lock(
+                    STAKING_ID,
+                    &l.stash,
+                    l.active,
+                    WithdrawReasons::all(),
+                );
+                Ledger::insert(&controller, l);
+                r
+            })
+        }
+    }
+}
