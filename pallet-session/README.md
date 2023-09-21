@@ -1,4 +1,4 @@
-### what's different between active_era and current_era
+### What's different between active_era and current_era?
 
 ActiveEra is the era that we are on.
 CurrentEra is the era that staking is on.
@@ -12,7 +12,9 @@ new_session -> try_trigger_new_era -> trigger_new_era -> increase CurrentEra
 
 ```
 
-https://github.com/paritytech/substrate-api-sidecar/blob/8906816/src/controllers/pallets/PalletsStakingProgressController.ts#L61L75
+#### Staking progress
+
+[staking_progress](https://github.com/paritytech/substrate-api-sidecar/blob/8906816/src/controllers/pallets/PalletsStakingProgressController.ts#L61L75)
 
 Note about 'active' vs. 'current' era: The _active_ era is the era currently being rewarded.
 That is, an elected validator set will be in place for an entire active era, as long as none
