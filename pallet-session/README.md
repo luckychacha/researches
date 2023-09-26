@@ -34,7 +34,7 @@ Set Changes:                               ^                             ^
 
 ```
 
-Here is something about differetn session index in `rotate_session` function:
+Here is something about different session index in `rotate_session` function:
 
 ```
 let session_index = <CurrentIndex<T>>::get();
