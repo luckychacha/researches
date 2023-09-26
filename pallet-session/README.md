@@ -34,3 +34,13 @@ Set Changes:                               ^                             ^
 
 ```
 
+Here is something about differetn session index in `rotate_session` function:
+
+```
+let session_index = <CurrentIndex<T>>::get();
+T::SessionManager::end_session(session_index);
+let session_index = session_index + 1;
+T::SessionManager::start_session(session_index);
+T::SessionManager::new_session(session_index + 1);
+
+```
